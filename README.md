@@ -1,10 +1,12 @@
 # Ops Treasury Constellation
 
 A small ETH treasury on Ethereum, run by four people: Ana, Ben, Maria and Steve.
-The design goal: a leaked key must not cause economic damage. Day-to-day work
-runs through six narrow roles. Each role can only move value inside the vault,
-or pay three whitelisted receivers. Each value-moving step has a budget of
-0.05 ETH worth per day.
+Day-to-day work runs through eight narrow roles. Six of them can only move
+value inside the vault, or pay three whitelisted receivers, so a leaked key in
+those roles causes no economic damage. Their value-moving steps have a budget
+of 0.05 ETH worth per day. Two roles pay out to any receiver by design, each
+with a small budget: vendor payments (50 USDC per 12 hours) and FOLD swaps
+(50 USD of WETH per day).
 
 The wiring follows the [sim org constellation](https://github.com/jomoormann/zodiac-sim-org-constellation):
 an Operator Vault proposes through a 24h Delay, and a Security council controlled by the Zodiac team can veto.
@@ -26,7 +28,7 @@ flowchart TB
   SC["Ops Security Council<br/>Safe 1/3: three private team keys"]
   T["Ops Treasury (vault)<br/>Safe 1/1: Security council"]
   D["Ops Treasury Delay<br/>24h cooldown, 7d expiration"]
-  R["Ops Treasury Roles<br/>6 roles, 7 daily budgets"]
+  R["Ops Treasury Roles<br/>8 roles, 9 budgets"]
   SC -- owner --> T
   OV -- "module: queues proposals" --> D
   D -- module --> T
@@ -35,13 +37,13 @@ flowchart TB
   people -- "role members" --> R
 ```
 
-| Node             | Label in the app       | Setup                                                                           |
-| ---------------- | ---------------------- | ------------------------------------------------------------------------------- |
-| Operator Vault   | `Ops Operator Vault`   | Safe, 2/3: Ana, Ben, Maria                                                      |
-| Security council | `Ops Security Council` | Safe, 1/3: three separate Zodiac team keys                                      |
-| Treasury (vault) | `Ops Treasury`         | Safe, 1/1: Security council. Roles and Delay are its modules |
-| Roles Modifier   | `Ops Treasury Roles`   | owner = avatar = target = treasury                                              |
-| Delay Modifier   | `Ops Treasury Delay`   | owner = avatar = target = treasury. Operator Vault is its only module           |
+| Node             | Label in the app       | Setup                                                                 |
+| ---------------- | ---------------------- | --------------------------------------------------------------------- |
+| Operator Vault   | `Ops Operator Vault`   | Safe, 2/3: Ana, Ben, Maria                                            |
+| Security council | `Ops Security Council` | Safe, 1/3: three separate Zodiac team keys                            |
+| Treasury (vault) | `Ops Treasury`         | Safe, 1/1: Security council. Roles and Delay are its modules          |
+| Roles Modifier   | `Ops Treasury Roles`   | owner = avatar = target = treasury                                    |
+| Delay Modifier   | `Ops Treasury Delay`   | owner = avatar = target = treasury. Operator Vault is its only module |
 
 Ana, Ben, Maria and Steve are the four member keys. The operator vault uses Ana, Ben and Maria. The Security council is controlled by the Zodiac team and uses three separate private keys. `members.ts` rejects any overlap between member and team keys.
 
@@ -65,14 +67,21 @@ so the team keys are kept apart from the member keys.
 
 ## Roles
 
-| Role           | Member           | Allows                                                                                                                                    | Budget per day                                 |
-| -------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `payroll`      | Ana              | `USDC.transfer` to three whitelisted receivers                                                                                            | 133 USDC, shared by the three                  |
-| `swap`         | Ben              | Wrap and unwrap ETH. CoW orders that sell WETH, USDC or USDT for ETH, WETH, USDC or USDT. Receiver = vault, fee = 0, ERC-20 balances only | 0.05 WETH, 133 USDC, 133 USDT (per sell token) |
-| `lido_staking` | Maria            | `stETH.submit`. Withdrawal requests owned by the vault. Claims that pay the vault                                                         | 0.05 ETH                                       |
-| `aave_wsteth`  | Maria            | Wrap and unwrap stETH. Supply wstETH to Aave v3 Core for the vault. Withdraw to the vault. No borrow                                      | 0.0401 wstETH (0.05 ETH worth)                 |
-| `morpho_usdc`  | Steve            | Deposit USDC into Steakhouse Prime USDC for the vault. Withdraw and redeem to the vault                                                   | 133 USDC                                       |
-| `veto`         | Security council | `setTxNonce` on the Delay                                                                                                                 | none                                           |
+| Role             | Member           | Allows                                                                                                                                    | Budget                                         |
+| ---------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `payroll`        | Ana              | `USDC.transfer` to three whitelisted receivers                                                                                            | 133 USDC, shared by the three                  |
+| `vendor_payroll` | Ana              | `USDC.transfer` to **any receiver**                                                                                                       | 50 USDC per 12 hours                           |
+| `swap`           | Ben              | Wrap and unwrap ETH. CoW orders that sell WETH, USDC or USDT for ETH, WETH, USDC or USDT. Receiver = vault, fee = 0, ERC-20 balances only | 0.05 WETH, 133 USDC, 133 USDT (per sell token) |
+| `fold_swap`      | Ben              | Wrap ETH. CoW orders that sell WETH for FOLD. **Any receiver**, fee = 0, ERC-20 balances only                                             | 0.0187 WETH (50 USD worth)                     |
+| `lido_staking`   | Maria            | `stETH.submit`. Withdrawal requests owned by the vault. Claims that pay the vault                                                         | 0.05 ETH                                       |
+| `aave_wsteth`    | Maria            | Wrap and unwrap stETH. Supply wstETH to Aave v3 Core for the vault. Withdraw to the vault. No borrow                                      | 0.0401 wstETH (0.05 ETH worth)                 |
+| `morpho_usdc`    | Steve            | Deposit USDC into Steakhouse Prime USDC for the vault. Withdraw and redeem to the vault                                                   | 133 USDC                                       |
+| `veto`           | Security council | `setTxNonce` on the Delay                                                                                                                 | none                                           |
+
+`vendor_payroll` and `fold_swap` are the two roles whose budget can leave the
+vault for good. They are separate roles on purpose: in one role, two
+permissions on the same function merge, and the payroll receiver list or the
+vault-pinned swap receiver would no longer bind.
 
 Every approval names one spender: the CoW vault relayer, wstETH, the Aave
 pool, the Lido withdrawal queue or the Morpho vault. Each of these pulls only
@@ -88,13 +97,21 @@ Value-neutral steps (wrap, unwrap) and returns to the vault (withdraw, redeem,
 claim) have no budget. A budget there protects nothing and slows down an
 emergency exit.
 
-### Daily budgets
+### Budgets
 
 Roles v2 meters in token units, so 0.05 ETH is converted once, in
 `constellation/allowances/index.ts`. Prices on 2026-09-29, block 26,084,674:
 
 - ETH/USD 2,675.30 (Chainlink ETH/USD). 0.05 ETH = 133 USDC or USDT.
 - 1.245174 stETH per wstETH. 0.05 ETH = 0.0401 wstETH.
+- The FOLD budget is 50 USD of WETH at the same price: 0.0187 WETH. At the
+  ETH price of 2026-10-02 (2,749) that is about 51 USD.
+
+The vendor budget is in USDC, so it needs no price: 50 USDC every 12 hours.
+
+A budget refills in whole periods, counted from the block in which it was set.
+After a deployment at 14:37 UTC, the daily budgets refill at 14:37 UTC every
+day, and the vendor budget at 14:37 and 02:37 UTC.
 
 To re-price, change `ETH_USD` or `STETH_PER_WSTETH` and push. Budgets do not
 roll over. The planned deposit is about $1,000 in ETH (about 0.374 ETH), so one
@@ -102,7 +119,16 @@ day's budget is about 13% of the treasury per action.
 
 ## Residual risks
 
-These remain with a leaked role key. All of them are capped by the daily budgets.
+These remain with a leaked role key. All of them are capped by the budgets.
+
+- **Vendor payments.** A leaked `vendor_payroll` key can pay 50 USDC to any
+  address every 12 hours.
+- **FOLD swaps.** A leaked `fold_swap` key can swap one day's WETH budget for
+  FOLD and send the FOLD to any address.
+- **Refill boundaries.** A budget refills at the start of each period, so a
+  leaked key can spend the end of one period and the start of the next a
+  minute apart. Over any 24 hours, the vendor budget can pay out at most
+  150 USDC, and a daily budget at most two days' worth.
 
 - **Swap price.** Roles v2 cannot check a price. A leaked `swap` key can sign
   an order with a bad limit price. CoW's solver auction sets the actual fill,
@@ -127,6 +153,7 @@ All on Ethereum mainnet, checked on chain on 2026-09-29.
 | `weth`                         | `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` |                                                                                                                                    |
 | `usdc`                         | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` |                                                                                                                                    |
 | `usdt`                         | `0xdAC17F958D2ee523a2206206994597C13D831ec7` |                                                                                                                                    |
+| `fold`                         | `0xE172e9B6cfBeeB5593bDcE3f077356FDb33af904` | Interfold (FOLD), 18 decimals, not a proxy. Only bought through CoW, checked on chain on 2026-10-02 (CoW quotes WETH to FOLD)      |
 | `cowswap.order_signer`         | `0x23dA9AdE38E4477b23770DeD512fD37b12381FAB` | Gnosis Guild CowswapOrderSigner, verified source. Pilot routes CoW Swap presignatures through it automatically                     |
 | `cowswap.vault_relayer`        | `0xC92E8bdf79f0507f65a392b0ab4667716BFE0110` | GPv2VaultRelayer (approval target only)                                                                                            |
 | `lido.steth`                   | `0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84` |                                                                                                                                    |
@@ -145,14 +172,16 @@ not in the Morpho app, so this constellation uses the largest listed vault.
 ## Verification
 
 1. **Zodiac compiles the spec.** Zodiac's resolve endpoint (read-only, it stores
-   nothing) compiles all six roles and predicts every address. The compiled
+   nothing) compiles all eight roles and predicts every address. The compiled
    conditions match the tables above. The `veto` role targets the predicted
    Delay and names the predicted team as its member.
-2. **Leak test on a mainnet fork: 74 of 74 checks pass** (block 26,084,781).
+2. **Leak test on a mainnet fork: 94 of 94 checks pass** (block 26,104,581).
    `test/leak-test.ts` deploys a Safe, the Roles Modifier and the Delay on a
    fork. It loads the permissions exactly as Zodiac compiles them, then acts as
-   each member. It runs 29 normal steps and 44 attacks. A refusal counts only
-   if the Roles Modifier itself refused it. The test also queues a drain through
+   each member. It runs 38 normal steps and 55 attacks. The four capped
+   payouts outside the vault (vendor payments, FOLD to another address) count
+   as normal steps. A refusal counts only if the Roles Modifier itself refused
+   it. The test also queues a drain through
    the Delay, vetoes it as the team, and shows it cannot execute after 24h.
    It does not rehearse the signatures of nested Safe owners, such as the
    council signing for the treasury.

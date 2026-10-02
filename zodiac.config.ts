@@ -8,6 +8,8 @@ export default defineConfig({
       weth: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
       usdc: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       usdt: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      // Interfold (FOLD), 18 decimals. Only bought, through CoW (fold_swap)
+      fold: "0xE172e9B6cfBeeB5593bDcE3f077356FDb33af904",
       cowswap: {
         // Gnosis Guild's CowswapOrderSigner: the vault delegatecalls it with
         // the full order, so Roles can check every field before it presigns

@@ -8,11 +8,11 @@ User-facing docs are in `README.md` — read it before suggesting edits to `cons
 
 Ops Treasury: a small ETH treasury on Ethereum (chain 1) for four people
 (Ana, Ben, Maria, Steve), built so that a leaked role key cannot move value
-out of the vault. Modeled on the sim org constellation. The Security council
+out of the vault, except two capped roles that pay any receiver by design
+(`vendor_payroll`, 50 USDC per 12h; `fold_swap`, WETH -> FOLD, 50 USD per day). Modeled on the sim org constellation. The Security council
 is a 1/3 Safe controlled by the Zodiac team and the treasury's sole 1/1 owner.
 Any one private council signer can veto or execute immediate treasury changes.
 The Operator Vault can act only through the 24-hour Delay.
-
 
 - All people, payees and the workspace are PLACEHOLDERS.
   `constellation/members.ts` throws while any placeholder is left, so `push`
@@ -22,10 +22,12 @@ The Operator Vault can act only through the 24-hour Delay.
   (`constellation/allowances/index.ts`, priced 2026-09-29). Wraps, unwraps and
   returns to the vault are unmetered on purpose.
 - Every receiver, `onBehalf`, `owner` and `to` parameter is pinned with
-  `c.avatar`. Do not loosen one without running the leak test.
+  `c.avatar`, except in `vendor_payroll` and `fold_swap`. Keep those two in
+  their own roles (same-function permissions merge inside a role). Do not
+  loosen another one without running the leak test.
 - `test/leak-test.ts` (`bun test:leaks`, needs a mainnet fork on FORK_RPC)
-  loads the permissions as Zodiac compiles them and runs 29 normal steps and
-  44 attacks. Run it after any change to `constellation/` or the config.
+  loads the permissions as Zodiac compiles them and runs 38 normal steps and
+  55 attacks. Run it after any change to `constellation/` or the config.
 - Known Zodiac bugs (README "Known issues"): a node ref used as a permission
   target is lowercased but matched case-sensitively, so export names in
   `constellation/index.ts` stay lowercase (`treasury_delay`); the allow kit

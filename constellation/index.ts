@@ -1,19 +1,23 @@
 import {
   aave_wsteth,
+  fold_swap,
   lido_staking,
   morpho_usdc,
   payroll,
   swap,
+  vendor_payroll,
   veto,
 } from "./roles";
 import {
   aave_wsteth_daily,
+  fold_weth_daily,
   lido_eth_daily,
   morpho_usdc_daily,
   payroll_usdc_daily,
   swap_usdc_daily,
   swap_usdt_daily,
   swap_weth_daily,
+  vendor_usdc_12h,
 } from "./allowances";
 import { eth } from "./context";
 import {
@@ -70,9 +74,11 @@ export const treasury = eth.safe["Ops Treasury"]({
   vault: true,
 });
 
-// Six roles, one Roles Modifier:
-//   payroll       Ana    USDC to 3 whitelisted receivers, 133 USDC/day
-//   swap          Ben    CoW ETH/WETH <-> USDC <-> USDT, 0.05 ETH worth/day per sell token
+// Eight roles, one Roles Modifier:
+//   payroll         Ana    USDC to 3 whitelisted receivers, 133 USDC/day
+//   vendor_payroll  Ana    USDC to any receiver, 50 USDC per 12h
+//   swap            Ben    CoW ETH/WETH <-> USDC <-> USDT, 0.05 ETH worth/day per sell token
+//   fold_swap       Ben    CoW WETH -> FOLD, any receiver, 50 USD of WETH/day
 //   lido_staking  Maria  stake ETH (0.05/day), unstake via the withdrawal queue
 //   aave_wsteth   Maria  wrap stETH, supply wstETH to Aave v3 Core (0.05 ETH worth/day)
 //   morpho_usdc   Steve  Steakhouse Prime USDC, 133 USDC/day
@@ -85,7 +91,9 @@ export const treasury_roles = eth.roles["Ops Treasury Roles"]({
   target: treasury,
   roles: {
     payroll,
+    vendor_payroll,
     swap,
+    fold_swap,
     lido_staking,
     aave_wsteth,
     morpho_usdc,
@@ -99,6 +107,8 @@ export const treasury_roles = eth.roles["Ops Treasury Roles"]({
     lido_eth_daily,
     aave_wsteth_daily,
     morpho_usdc_daily,
+    vendor_usdc_12h,
+    fold_weth_daily,
   },
 });
 

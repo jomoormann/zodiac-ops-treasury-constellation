@@ -750,6 +750,101 @@ await expect(
   execAs(ANA, "swap", call(eth.weth, wethAbi, "deposit", [], { value: 1n })),
 );
 
+// ── vendor payments (Ana)
+section("vendor_payroll: USDC to any receiver, 50 USDC per 12 hours");
+const VENDOR: Address = "0x000000000000000000000000000000000000be01";
+const vendorBefore = await balance(eth.usdc, VENDOR);
+await expect(
+  "allow",
+  "Ana",
+  "pay 30 USDC to a vendor outside the vault (capped by design)",
+  execAs(
+    ANA,
+    "vendor_payroll",
+    call(eth.usdc, erc20, "transfer", [VENDOR, usdc("30")]),
+  ),
+  async () => (await balance(eth.usdc, VENDOR)) - vendorBefore === usdc("30"),
+);
+await expect(
+  "allow",
+  "Ana",
+  "pay 20 USDC to any other address (capped by design)",
+  execAs(
+    ANA,
+    "vendor_payroll",
+    call(eth.usdc, erc20, "transfer", [ATTACKER, usdc("20")]),
+  ),
+);
+await expect(
+  "deny",
+  "Ana",
+  "pay 1 more USDC in the same 12 hours",
+  execAs(
+    ANA,
+    "vendor_payroll",
+    call(eth.usdc, erc20, "transfer", [VENDOR, usdc("1")]),
+  ),
+);
+await expect(
+  "deny",
+  "Ana",
+  "pay a vendor in USDT",
+  execAs(
+    ANA,
+    "vendor_payroll",
+    call(eth.usdt, erc20, "transfer", [VENDOR, 1n]),
+  ),
+);
+await expect(
+  "deny",
+  "Ana",
+  "approve a vendor to pull USDC",
+  execAs(
+    ANA,
+    "vendor_payroll",
+    call(eth.usdc, erc20, "approve", [VENDOR, maxUint256]),
+  ),
+);
+await expect(
+  "deny",
+  "Ana",
+  "transferFrom the vault to a vendor",
+  execAs(
+    ANA,
+    "vendor_payroll",
+    call(eth.usdc, erc20, "transferFrom", [treasury, VENDOR, 1n]),
+  ),
+);
+await expect(
+  "deny",
+  "Ana",
+  "send ETH to a vendor",
+  execAs(ANA, "vendor_payroll", { to: VENDOR, data: "0x", value: 1n }),
+);
+// A budget set with timestamp 0 starts at the block it was set in, and
+// refills every whole period after that
+const [, , vendorPeriod, , vendorTimestamp] = await publicClient.readContract({
+  address: roles,
+  abi: rolesAbi,
+  functionName: "allowances",
+  args: [encodeKey("vendor_usdc_12h")],
+});
+const nextRefill =
+  vendorTimestamp +
+  (((await now()) - vendorTimestamp) / vendorPeriod + 1n) * vendorPeriod;
+await testClient.increaseTime({ seconds: Number(nextRefill - (await now())) });
+await testClient.mine({ blocks: 1 });
+await expect(
+  "allow",
+  "Ana",
+  "pay 50 USDC again after the 12-hour refill",
+  execAs(
+    ANA,
+    "vendor_payroll",
+    call(eth.usdc, erc20, "transfer", [VENDOR, usdc("50")]),
+  ),
+);
+
 // ── swaps (Ben)
 section("swap: CoW between ETH/WETH, USDC and USDT, proceeds to the vault");
 const settlementDomain = {
@@ -1052,6 +1147,135 @@ await expect(
     "swap",
     call(eth.weth, wethAbi, "withdraw", [parseEther("0.05")]),
   ),
+);
+
+// ── FOLD swaps (Ben)
+section("fold_swap: CoW WETH -> FOLD, any receiver, 50 USD of WETH per day");
+const foldBudget = BigInt(
+  compiled.allowances.find((a: any) => a.key === encodeKey("fold_weth_daily"))
+    .refill,
+);
+await expect(
+  "allow",
+  "Ben",
+  "wrap 0.05 ETH to WETH",
+  execAs(
+    BEN,
+    "fold_swap",
+    call(eth.weth, wethAbi, "deposit", [], { value: parseEther("0.05") }),
+  ),
+);
+await expect(
+  "allow",
+  "Ben",
+  "approve the CoW vault relayer for WETH",
+  execAs(
+    BEN,
+    "fold_swap",
+    call(eth.weth, erc20, "approve", [eth.cowswap.vault_relayer, maxUint256]),
+  ),
+);
+// One pinned field off per order, while the budget is still unspent
+await expect(
+  "deny",
+  "Ben",
+  "buy USDC instead of FOLD",
+  execAs(
+    BEN,
+    "fold_swap",
+    signOrder(
+      await order({ sellToken: eth.weth, buyToken: eth.usdc, sellAmount: 1n }),
+    ),
+  ),
+);
+await expect(
+  "deny",
+  "Ben",
+  "sell USDC for FOLD",
+  execAs(
+    BEN,
+    "fold_swap",
+    signOrder(
+      await order({ sellToken: eth.usdc, buyToken: eth.fold, sellAmount: 1n }),
+    ),
+  ),
+);
+await expect(
+  "deny",
+  "Ben",
+  "add a fee to a FOLD order",
+  execAs(
+    BEN,
+    "fold_swap",
+    signOrder(
+      await order({
+        sellToken: eth.weth,
+        buyToken: eth.fold,
+        sellAmount: 1n,
+        feeAmount: 1n,
+      }),
+    ),
+  ),
+);
+await expect(
+  "deny",
+  "Ben",
+  "sell more WETH than one day's budget",
+  execAs(
+    BEN,
+    "fold_swap",
+    signOrder(
+      await order({
+        sellToken: eth.weth,
+        buyToken: eth.fold,
+        sellAmount: foldBudget + 1n,
+      }),
+    ),
+  ),
+);
+const foldOrder = await order({
+  sellToken: eth.weth,
+  buyToken: eth.fold,
+  sellAmount: foldBudget,
+  receiver: ATTACKER,
+});
+await expect(
+  "allow",
+  "Ben",
+  `sell ${Number(foldBudget) / 1e18} WETH for FOLD paid outside the vault (capped by design)`,
+  execAs(BEN, "fold_swap", signOrder(foldOrder)),
+  () => presigned(foldOrder),
+);
+await expect(
+  "deny",
+  "Ben",
+  "sell 1 more wei of WETH today",
+  execAs(
+    BEN,
+    "fold_swap",
+    signOrder(
+      await order({ sellToken: eth.weth, buyToken: eth.fold, sellAmount: 1n }),
+    ),
+  ),
+);
+await expect(
+  "deny",
+  "Ben",
+  "transfer WETH out directly",
+  execAs(BEN, "fold_swap", call(eth.weth, erc20, "transfer", [ATTACKER, 1n])),
+);
+await expect(
+  "allow",
+  "Ben",
+  "cancel the FOLD order",
+  execAs(
+    BEN,
+    "fold_swap",
+    call(eth.cowswap.order_signer, orderSignerAbi, "unsignOrder", [foldOrder], {
+      operation: 1,
+    }),
+  ),
+  async () => !(await presigned(foldOrder)),
 );
 
 // ── Lido (Maria)
@@ -1651,6 +1875,30 @@ await expect(
   "sell 0.05 WETH the next day",
   execAs(BEN, "swap", signOrder(nextDayOrder)),
   () => presigned(nextDayOrder),
+);
+
+await expect(
+  "allow",
+  "Ana",
+  "pay a vendor 50 USDC in a new period",
+  execAs(
+    ANA,
+    "vendor_payroll",
+    call(eth.usdc, erc20, "transfer", [VENDOR, usdc("50")]),
+  ),
+);
+const nextDayFoldOrder = await order({
+  sellToken: eth.weth,
+  buyToken: eth.fold,
+  sellAmount: foldBudget,
+  receiver: ATTACKER,
+});
+await expect(
+  "allow",
+  "Ben",
+  "sell one day's WETH budget for FOLD the next day",
+  execAs(BEN, "fold_swap", signOrder(nextDayFoldOrder)),
+  () => presigned(nextDayFoldOrder),
 );
 
 const total = results.length + 1;
